@@ -1,0 +1,12 @@
+FilteredListExample
+===================
+
+FilteredListExample is a simple-sample list. 
+It shows a ListFragment helped by a custom BaseAdapter.
+Sample items can be added, and all items can be cleared from menu. 
+Items are not saved between sessions. 
+Long and short taps are implemented.
+Options menus are available form Activity and also form Fragment.
+
+Longer explanation (Hungarian) can be found at 'http://lattilad.org/android'
+

@@ -1,0 +1,213 @@
+[b][i]Lista és ami körülötte van[/i][/b]
+
+Egyszerű listák készítésével már a [url=http://lattilad.org/android/?x=entry:entry121216-123733]Listák kezelése[/url] c. cikkben megismerkedtünk. A legtöbb programban szerepel lista, de a fenti egyszerű példánál általában sokkal komplexebb formában. Most egy olyan alap-programot szeretnénk elkészíteni, ami [i]Fragment[/i]-en mutat be egy kereshető listát. A listát egy saját [i]Loader[/i] tölti fel, a kiválasztott elemekről pedig egy [i]DialogFragment[/i]-en keresztül kapunk értesítést. A program lényegi részei jelenleg csak példák vagy szimulációk (ld. később), de a keret működőképes, és alapot biztosít további programokhoz.
+
+[b][i]SampleEntry.java[/i][/b]
+
+Ez az osztály biztosítja a lista által kezelt elemeket; csak példaként létrehozott elemekkel dolgozik. A [i]SampleEntry[/i] példányok két osztályváltozót tartalmaznak: a [i]sampleLong[/i] a létrehozás [i]long[/i]-ban kifejezett időpontját tartalmazza, míg a [i]sampleString[/i] az előbbi érték utolsó számjegye alapján kiválasztott tizenkét példa-string egyikét.
+A lista elemeit sorba fogjuk rendezni, ehhez szükséges, hogy megvalósítsuk a [i]Comparable interface[/i]-t. A [i]compareTo()[/i] metódus az összehasonlítást a [i]sampleString[/i] (és nem a numerikus érték!) alapján fogja elvégezni. Figyeljük meg, hogy [b]null[/b] értéket is kezel, ilyenkor üres stringgel végzi az összehasonlítást. (Erre a konkrét megvalósításban nincs szükség, de későbbi változatokban használni fogjuk.)  
+
+[b][i]A megjelenítéshez szükséges layout-ok[/i][/b]
+Először egy nagyon egyszerű listát valósítunk meg. A megjelenítéséhez három [i]layout[/i] szükséges: 
+[i]sample_entry_row_view.xml[/i]
+[i]main_list_fragment.xml[/i]
+[i]main_activity.xml[/i]
+A lista minden egyes sora egy [i]SampleEntry[/i]-t jelenít meg. Ezt a [i]sample_entry_row_view.xml[/i] írja le. Figyeljük meg, hogy a sor magasságát az adatokhoz szabjuk, de a rendelkezésre álló teljes szélességet kihasználjuk!
+Ezekből a sorokból a [i]main_list_fragment.xml[/i] alkot egy listát. Figyeljük meg, hogy a kép elemeit nem egyszerűen felülről lefelé készítjük el! Elsőként a fix méretű [i]Button[/i]-t definiáljuk, majd a mellette rendelkezésre álló teret feltöltjük egy [i]EditText[/i]-tel. (Ezt később a szűrésre fogjuk felhasználni.) A teljes fennmaradó teret a [i]ListView[/i] tölti ki.
+A [i]main_activity.xml[/i] csupán egy [i]Frame[/i]-et ad a [i]Fragment[/i] számára. Ennek a feltöltését dinamikusan fogjuk elvégezni.
+
+Nagyon fontos beállítani, hogy miként viselkedjen a felületünk, ha megváltozik a mérete. Két lehetőségünk van: [i]adjust pan[/i] és [i]adjust resize[/i]. Az [i]adjust pan[/i] nem fogja megváltoztatni a kép méretét, csupán a fókuszban lévő mező ugrik elő. Esetünkben ez - mivel a képernyő alján van a beírásra szolgáló mező - azzal a furcsa következménnyel járt, hogy a lista teteje és a státuszsor kiugrott a képből. Emiatt nekünk alkalmazkodnunk kell a kisebb képmérethez, ha megjelenik a [i]soft keyboard[/i].
+Írjuk be az [i]AndroidManifest.xml[/i] file [i]activity[/i] tagjába:
+[code]
+android:windowSoftInputMode="adjustResize|stateAlwaysHidden">
+[/code]
+(a [i]stateAlwaysHidden[/i] a billentyűzetre vonatkozik, erről a billentyűzet elrejtése kapcsán ejtettünk szót.)
+
+[b][i]A program kód-része[/i][/b]
+Itt is három osztályt kell elkészítenünk (a [i]SampleEntry[/i] mellett):
+[i]MainActivity[/i]
+[i]MainListFragment[/i]
+[i]MainListAdapter[/i]
+
+A [i]MainActivity[/i] feladata egyelőre egyszerű: az [i]onResumeFragments[/i] részben (vagyis amikor már minden korábban létrehozott [i]Fragment[/i] visszatért) ellenőrzi, hogy van-e a [i]Frame[/i]-ben már [i]Fragment[/i]. Ha nincs (tehát az első indításkor), létrehoz egy újat:
+[code]
+@Override
+protected void onResumeFragments()
+	{
+	super.onResumeFragments();
+	FragmentManager fragmentManager = getSupportFragmentManager();
+	Fragment mainListFragment = fragmentManager.findFragmentByTag("LIST");
+	if (mainListFragment == null)
+		{
+		mainListFragment = MainListFragment.newInstance( );
+
+		FragmentTransaction fragmentTransaction = fragmentManager.beginTransaction();
+		fragmentTransaction.add( R.id.main_frame, mainListFragment, "LIST" );
+		fragmentTransaction.commit();
+		}
+	}
+[/code]
+(Ezen kívül a [i]MainActivity[/i] tartalmaz egy egyszerű menüt is; ill. didaktikai okokból a főbb eseményeket vezérlő metódusokat is - csupán egy debug helyjelöléssel - beletettem.)
+
+A másik fő feladat (ami ugyan a program szempontjából lényegtelen, de a programozónak fontos), hogy itt inicializáljuk, és indítjuk el a [i]Scribe[/i] osztályt. Ez az osztály a [i]MagicMerlin[/i] könyvtárunkban helyezkedik el, ezt tehát kapcsolnunk kell. [i]Eclipse[/i] alatt a [i]Project Properties[/i]-ben találunk egy [i]Android[/i] fület. A [i]Library/Add[/i] részben tudjuk a könyvtárat a programunkhoz adni. (Bővebben: [url=http://lattilad.org/android/?x=entry:entry130618-111733]Könyvtár-projektek használata[/url])
+
+A [i]Scribe[/i] írni fogja az [i]SD-kártyát[/i] (mégpedig a root-könyvtárba fogja elhelyezni a [i]package[/i] nevével megegyező [i]log file[/i]-t. Ezt engedélyeznünk kell az [i]AndroidManifest.xml[/i]-ben:
+[code]
+<uses-permission 
+	android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
+[/code]
+
+Majd az [i]onCreate[/i] kódjában inicializáljuk a [i]Scribe[/i]-ot:
+[code]
+Scribe.init(this);
+Scribe.checkLogFileLength();
+Scribe.logUncaughtExceptions();
+
+Scribe.title("FilteredListExample started.");
+[/code]
+Ezzel már [i]AIDE[/i] alatt, akár nem-rootolt készüléken is tudjuk folytatni a munkát.
+
+[b][i]MainListAdapter és MainListFragment[/i][/b]
+Az egyszerűség kedvéért az adatokat egy, a [i]MainListFragment[/i]-ben elhelyezkedő [i]ArrayList[/i] tárolja. Ezt most nem őrizzük meg az újraindítások között, bár ezt megtehetnénk bármelyik, a [i]GlobalVariables[/i] ???? részben megismert módszerrel.
+
+A [i]MainListFragment[/i] alig valamit tesz. Egy [i]static[/i] metódussal visszaadja a saját példányát, bár jelenleg [i]argumentum[/i]-ok nem szükségesek a működéséhez ([i]Static Factory Method[/i]).
+Elkészíti a szükséges [i]View[/i]-t, de ebből is csak az [i]addButton[/i] kezelése történik meg. A gomb hozzáad egy új elemet az [i]entries[/i] tömbhöz, majd a [i]notifyDataSetChanged()[/i] utasítással értesíti az [i]Adapter[/i]-t, hogy az adatok megváltoztak.
+Erre érdemes bővebben is kitérni. Az [i]Adapter[/i] egy külső [i]ArrayList[/i] tömböt köt a [i]ListView[/i]-hoz. Ez azt jelenti, hogy az [i]ArrayList[/i] bővülhet a [i]Fragment[/i] (vagy egyéb programrészek) alatt is; vagy éppen [i]Adapter[/i] segítségével. Ha az adatok a tömbben megváltoztak, akkor a [i]notifyDataSetChanged()[/i] utasítással (mint itt) kényszeríthetjük a [i]ListView[/i]-t, hogy újra jelenítse meg az elemeit.
+Egy dolgot azonban nem tehetünk meg: az [i]Adapter[/i] a konstruktorban megkapta a létrehozott tömb címét, így [u]csak[/u] ezzel a tömbbel tudunk dolgozni. Nem tudjuk kompletten kicserélni a tömböt - hacsak nem készítünk a konstrokturon kívül így másik metódust erre a célra.
+
+Az utolsó teendő az [i]onListItemClick()[/i] elkészítése, mellyel a kiválasztott elemet jelenítjük meg - ezúttal egy [i]Toast[/i]-on. A [i]long id[/i]és az [i]int position[/i] esetünkben azonos. E két érték különbségének majd [i]sqlite[/i] alatt lesz jelentősége. 
+
+A [i]MainListAdapter[/i] képességei jelenleg még az [i]ArrayAdapter[/i] lehetőségeit sem érik el. Most mégis a [i]BaseAdapter[/i] osztályt fogjuk kibővíteni. (Egyébként ez szolgál az [i]ArrayAdapter[/i] alapjául is.) Ennek két oka van: egyrészt így könnyebb megismerni és megérteni az adapter működését; másrészt a projekt végére a nekünk szükséges összes funkciót megváltoztatnánk.
+
+A [i]MainListAdapter[/i] az [i]entries[/i] tömbben tárolja a megkapott adatok hivatkozását. (Ld. fent. Ennek az értéknek a megváltoztatása szükséges ahhoz, hogy a megjelenített tömbnek nem csak az elemeit, hanem magát a tömböt kompletten lecseréljük.) Értéke - elvileg - lehet [b]null[/b] (ld. [i]getCount()[/i]), de jelenleg nincs olyan metódusunk, amivel ezt az üres tömböt le tudnánk cserélni.
+A metódusok kódja szinte a nevükből ered. A legfontosabb a [i]getView()[/i], mely egy konkrét sorhoz tartozó [i]View[/i]-t fog elkészíteni. 
+
+A [i]getView()[/i] metódusban [b]két optimalizálást[/b] is alkalmazunk:
+1. Figyeljük meg, hogy takarékossági okokból nem kell mindig új [i]View[/i]-t készíteni, hanem kaphatunk a rendszertől egy már üressé vált [i]View[/i]-t, és akkor elég azt feltölteni. (Ha mégis új [i]View[/i] elkészítése szükséges, akkor a konstruktorban már elkészített [i]layoutInflater[/i]-t tudjuk felhasználni; ehhez kellett a [i]context[/i].) Ezzel az optimalizálással már a [url=http://lattilad.org/android/?x=entry:entry121216-123733]Listák kezelése[/url] cikkben is foglalkoztunk.
+2. A [i]View[/i] egyes mezőit sem fogjuk újra előkeresni, hanem csak a [i]View[/i] első létrehozáskor. Az adatokat egy külön erre készített [i]ViewHolder[/i] osztályban tároljuk. Ezt az osztályt [i]tag[/i]-ként hozzá tudjuk adni a [i]View[/i]-hez. A későbbiekben, amikor  a rendszer visszaadja az elkészített, de üressé vált [i]View[/i]-t, akkor a mezőket is meg fogjuk találni a [i]View[/i]-hez kötötten.
+Erről a kérdésről érdemes elolvasni pl. [url=http://www.javacodegeeks.com/2013/09/android-viewholder-pattern-example.html]Android ViewHolder Pattern Example[/url] c. cikket.
+
+[b][i]Apróságok[/i][/b]
+
+A programunk már működőképes, (igaz, nem túl sokat tud). Mielőtt továbblépnénk, egy-két aprósággal még kiegészíthetjük a kódot.
+
+[b]Long-click[/b]
+A [i]ListFragment[/i] automatikusan kezeli a rövid tappintást. Van azonban lehetőség arra, hogy a hosszú érintést is lekezeljük. (Vagy alternatívaként ehelyett [i]context menu[/i]-t készíthetünk.) Érdemes elolvasni a [url=http://stackoverflow.com/questions/6732611/long-click-on-listfragment]Long click on ListFragment[/url] oldalt.
+A [i]ListView[/i]-hoz regisztrálnunk kell egy [i]onItemLongClickListener[/i]-t. Most ez a [i]Listener[/i] a saját osztályunk lesz.
+Jelezzük, hogy az osztályunk megvalósítja ezt a [i]Listener[/i]-t:
+[code]
+public class MainListFragment extends ListFragment implements AdapterView.OnItemLongClickListener
+[/code]
+Regisztráljuk a [i]Listener[/i]-t (vagyis saját magunkat: [b]this[/b]), az [i]onActivityCreated()[/i]-ben (amikor már biztosan van [i]ListView[/i]):
+[code]
+public void onActivityCreated(Bundle savedInstanceState)
+	{
+	…
+	getListView().setOnItemLongClickListener( this );
+	…
+	}
+[/code]
+Végül készítsük el a szükséges metódust! A rövid-érintéshez képest annyi a különbség, hogy - amennyiben fel tudtuk dolgozni a kérést - [b]true[/b] értékkel kell visszatérnünk.
+[code]
+@Override
+public boolean onItemLongClick(AdapterView<?> parent, View view, int position, long id)
+	{
+	…
+	return true;
+	}
+[/code]
+
+[b]Options menu[/b]
+A menü az [i]activity[/i] és az egyes [i]fragment[/i]-ek menüiből együttesen áll össze. Az [i]Activity[/i]és a [i]Fragment[/i] oldalán vannak apróbb különbségek a menük létrehozásában, ezt érdemes áttekinteni.
+
+[b]Activity - Options menu[/b]
+A menü létrehozása az [i]onCreateOptionsMenu()[/i]-ben történik meg. Ez a metódus azonban csak az első létrehozáskor kerül meghívásra! A menü csak akkor kerül meghívásra, ha a visszatérési érték [b]true[/b]. Megjegyzendő, hogy [i]xml[/i]-ből a [i]getMenuInflater().inflate()[/i] segítségével tudjuk a menüt elkészíteni:
+[code]
+@Override
+public boolean onCreateOptionsMenu( Menu menu )
+	{
+	getMenuInflater().inflate(R.menu.main_activity, menu);
+	return true;
+	}
+[/code]
+Ha a megjelenítés előtt még változtatnunk kell a menün, akkor ezt az [i]onPrepareOptionsMenu()[/i]-ben tehetjük meg; ez ugyanis minden egyes megjelenítés előtt meghívásra kerül. ((API11 felett a menü folyamatosan látható, itt az [i]invalidateOptionsMenu()[/i] segítségével tudjuk a menü ismételt elkészítését kikényszeríteni - de ezzel most nem foglalkozunk.))
+A paraméterként átadott [i]Menu[/i] elemeit módosíthatjuk, majd szintén [b]true[/b] értékkel kell visszatérnünk, különben a menü nem jelenik meg.
+[code]
+@Override
+public boolean onPrepareOptionsMenu( Menu menu )
+	{
+	...
+	return true;
+	}
+[/code]
+Végezetül el kell készítsük az [i]onOptionsItemSelected()[/i] metódust, mely a menüelemek kiválasztásakor kerül meghívásra. Ha le tudtuk kezelni az adott menüelemet, akkor a visszatérési érték [b]true[/b], ha nem, akkor [b]false[/b]. Bár a kód így is működik, a dokumentáció lelkünkre köti, hogy az utóbbi esetben a [i]super.onOptionsItemSelected()[/i] eredményét adjuk vissza (ami egyébként nemes egyszerűséggel [b]false[/b] lesz)!
+[code]
+@Override 
+public boolean onOptionsItemSelected(MenuItem item) 	
+	{
+	switch (item.getItemId())
+		{ 	
+		case R.id.about:
+			{
+			...
+			return true; 	
+			}
+		default: 	
+			return super.onOptionsItemSelected(item); 	 
+		}
+	}
+[/code]
+
+[b]Fragments - Options menu[/b]
+A rendszer minden egyes, éppen az [i]Activity[/i]-hez kapcsolt [i]Fragment[/i] menürendszerét is alkalmazni fogja. Ezen menük elkészítésére és lekezelésére három hasonló metódust kell elkészítenünk. Mielőtt azonban ezt megtennénk, jelezni kell (szemben az [i]Activity[/i]-vel), hogy a [i]Fragment[/i]-hez tartozni fog options-menü. Ezt megtehetjük az [i]onCreate()[/i] metódusban; az egyszerűség kedvéért most az [i]onActivityCreated()[/i] részbe került.
+[code]
+@Override
+public void onActivityCreated(Bundle savedInstanceState)
+	{
+	super.onActivityCreated(savedInstanceState);
+	
+	// Fragment has options menu
+	setHasOptionsMenu(true);
+	...
+	}
+[/code]
+Az [i]onCreateOptionsMenu()[/i]paraméterként megkapja a [i]MenuInflater[/i]-t, valamint visszatérési értéke sincs. 
+[code]
+@Override
+public void onCreateOptionsMenu( Menu menu, MenuInflater inflater )
+	{
+	inflater.inflate(R.menu.main_list_fragment, menu);
+	}
+[/code]
+Az [i]onPrepareOptionsMenu()[/i]-ben szintén megváltoztathatjuk a megjelenítések előtt a [i]menu[/i] elemeit. Az előbbi metódushoz hasonlóan itt sincs visszatérési érték.
+[code]
+@Override
+public void onPrepareOptionsMenu( Menu menu )
+	{
+	...
+	}
+[/code]
+Az [i]onOptionsItemSelected()[/i] nem különbözik az [i]Activity[/i]-nál megismerttől. Itt is a [b]true[/b] visszatérési érték jelzi, ha a kiválasztott menü-elem végrehajtotta a feladatát, [b]false[/b], ha mehetünk tovább.
+[code]
+@Override
+public boolean onOptionsItemSelected(MenuItem item) 
+	{
+	switch (item.getItemId()) 
+		{
+		case R.id.clear:
+			...
+			return true;
+
+		default:
+			return super.onOptionsItemSelected(item);
+		}
+	}
+[/code]
+
+[b]Empty-text megváltoztatása[/b]
+Az üres listát jelentő [i]empty view[/i]-t most a [i]main_list_fragment.xml[/i]-ben állítottuk be. Szükség lehet azonban arra, hogy a view-t vagy a szöveget dinamikusan adjuk meg. Érdemes elolvasni a [url=https://code.google.com/p/android/issues/detail?id=21742]Compatibility Library v4 ListFragment uses internal id for 'empty' TextView[/url] hiba leírását. Ennek alapján az [i]empty text[/i] így állítható be:
+[code]
+((TextView)(getListView().getEmptyView())).setText("Changed empty text");
+[/code]
+Ezt a kódot most nem használjuk, de az általunk használt [i]custom empty view[/i] esetén is ugyanígy járhatunk el - ezúttal hiba nélkül.
+

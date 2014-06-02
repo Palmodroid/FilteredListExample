@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent" >
+
+    <Button
+        android:id="@+id/add_button"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_alignParentBottom="true"
+        android:layout_alignParentLeft="true"
+        android:text="@string/add_button" />
+
+    <EditText
+        android:id="@+id/filter"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_alignParentBottom="true"
+        android:layout_toRightOf="@id/add_button"
+        android:hint="@string/filter_hint" />
+
+    <!-- or android:layout_alignBaseline="@id/add_button" -->
+    
+    
+    <ListView
+        android:id="@android:id/list"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_above="@id/add_button" >
+        <requestFocus />
+    </ListView>
+        
+	<!-- http://code.google.com/p/android/issues/detail?id=21742 -->
+	<!-- setEmptyText()not working!, ...getEmptyView().setText() is needed! -->
+
+	<TextView
+	    android:id="@android:id/empty"
+	    android:layout_width="wrap_content"
+	    android:layout_height="wrap_content"
+	    android:layout_above="@+id/add_button"
+	    android:text="@string/empty_list"
+	    android:textAppearance="?android:attr/textAppearanceMedium"
+	    android:textColor="#ff737373" />
+
+</RelativeLayout>
