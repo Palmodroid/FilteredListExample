@@ -1,0 +1,207 @@
+[b][i]Lista és ami körülötte van[/i][/b]
+
+A lista eddig szűretlen volt, csupán az [i]entries[/i] tömb tartalmát jelenítette meg. Mi történik akkor, amikor a listát megszűrjük? Továbbra is tárolni kell a teljes adatbázist, melyből a szűrést elvégezzük ([i]originalEntries[/i]). Ugyanakkor szükség lesz egy másik tömbre is, melybe a szűrési feltételeknek megfelelő elemeket helyezzük el ([i]filteredEntries[/i]). Már most fontos megjegyezni, hogy az egyes elemekből csupán egyetlen példány létezik, és arra a példányra mutat két vagy több tömb. (Ez egyben azt is jelenti, hogy az egyes elemek megváltoztatása a szűrt listában is tükröződik, még akkor is, ha a megváltoztatott elem nem felel meg a szűrési feltételeknek. Természetesen ez csak a következő szűrésig igaz.)
+A lista a [i]filteredEntries[/i] tömb adatait fogja megjeleníteni. Ha nincs szűrési feltétel, akkor a [i]filteredEntries[/i] az [i]originalEntries[/i]-re mutat. A szűrés háttérszálon történik, folyamatosan emeli ki az elemeket az [i]originalEntries[/i] tömbből. A [i]filteredEntries[/i] értéke nem folyamatosan változik, hanem a szűrés végén kap új értéket. 
+Amennyiben a szűrés gyors, és a szűrés közben nem következik be változás az adatokban, ez a rendszer tökéletesen működik. Ha azonban a szűrési feladat hosszadalmas, akkor vagy az adatváltozás nem tükröződik a listában, vagy a szűrés nem teljesül. Szerencsére ez inkább logikai feladvány, semmint gyakorlati probléma. Mivel amúgy is a multithreading lehetőségeivel foglalkoztam, megkíséreltem megoldani.
+
+Nézzük először, milyen módon változhatnak az adatok:
+- készíthetünk egy kompletten új tömböt, és kicserélhetjük a teljes adatállományt. Erre az [i]ArrayAdapter[/i] nem ad lehetőséget.
+- az adapter segítségével módosítjuk az adapter által (is) tárolt tömb elmeit. 
+- a külső oldalon tárolt tömb elemeit módosítjuk hasonló módon, és értesítjük az adaptert [i]notifyDatasetChanged()[/i] utasítással.
+
+A teljes adatállomány lecseréléséhez külön metódust kell készítenünk ([i]setData[/i]), idáig ugyanis a használt tömböt a konstruktor állította be. Ennél a megoldásnál a szűrt listát mindenképp frissíteni kell. Megszüntetjük a szűrési feltételt (ehhez csak a [i]filteredEntries[/i]-nek is az új tömb értékét kell adjuk). Ilyenkor azonban vigyázni kell arra, hogy a háttérben esetleg fut már egy szűrés, ami később átírhatja a [i]filteredEntries[/i] adatait. Helyesebb, ha leállítjuk/figyelmen kívül hagyjuk a folyamatban lévő szűrést, és kikényszerítünk egy újat (figyeljünk arra, hogy a szűrési feltételt ehhez valahol tárolnunk kell).
+
+Ha az adapter módosítja az adatokat, akkor aránylag egyszerű a helyzetünk, mert rögtön tudni fogjuk, hogy az adatok megváltoztak. Talán a legcélravezetőbb ilyenkor is megállítani, és újraindítani a szűrést. Eldönthetjük, hogy a változást csak az [i]originalEntries[/i]-ben jelezzük, vagy - a kikényszerített szűrés idejére - a teljes listát megjelenítjük. ((Elméleti fejtegetés ugyan, mert az adatváltozás itt aránylag ritka lesz, de éppen tovább lehetne optimalizálni a szűrési folyamatot azzal, hogy csak az aktuálisan megváltozott adat ellenőrzését végezzük el.))
+
+Jó kérdés, hogy megengedhető-e a külső adatforrás változtatása? A szűrő is a külső adatokat olvassa, de háttérszálon. Ha az adatok a szűrés alatt megváltoznak, akkor hamis eredményt kapunk. Ugyanakkor a hamis eredmény mindenképp el lesz dobva, mert az adatváltozás kikényszeríti a szűrés megállítását, egyúttal kikényszerít egy új szűrést - mely nem változó adatokból történik. Az adatváltoztatást tehát megengedhetjük, figyelni pedig egy [i]DataSetObserver[/i] regisztrálásával tudjuk.
+
+((Ebben a megvalósításban az adapter adatkezelése a fő szálon, a szűrés háttérszálon történik. Az adatok NEM szál-biztosak, adatmódosítás esetén a szűrési eredmény hibás lesz. Ugyanakkor az adatmódosítás miatt a potenciálisan hibás eredményt eldobjuk, és csak azt használjuk fel, amelyik szűrésénél NEM következett be adatváltozás.
+Készítettem egy olyan szinkronizált [i]ArrayList[/i]-osztályt is, amelyik több szálon is használható. Nem csak az egyes tömb-elemek kerülnek szinkronizálásra, hanem a teljes [i]iteration[/i] ciklus is. Ha a feldolgozás alatt a már elkészített elemekben strukturális változás következik be, akkor az osztály ezt egy kivétellel jelzi. A feldolgozó rész újraindíthatja a megváltozott tömb feldolgozását. Bár ez az osztály végül nem került felhasználásra, de későbbi bemutatást megér.))   
+
+Készítsük el a kódot a fenti tervek alapján! A teljes tömb cseréjét és a külső adatváltoztatást valósítjuk meg, a belső adatváltoztatás logikája nem sokban különbözik a külsőtől. Jelezzük, hogy az adapter [i]Filterable[/i]! Ez előírja a [i]getFilter()[/i] megvalósítását.
+[code]
+public class MainListAdapter extends BaseAdapter implements Filterable
+	{
+	private EntryFilter entryFilter;
+	...
+	public Filter getFilter()
+		{
+		if (entryFilter == null)
+			entryFilter = new EntryFilter();
+		return entryFilter;
+		}	
+	}
+[/code]
+A kód egy [i]EntryFilter[/i] osztályt fog visszaadni, melyet belső osztályként készítünk el. Az alap elgondolás elég egyszerű, de rejt néhány buktatót. Két metódust nekünk kell elkészítenünk, a kész [i]filter()[/i] metódus segítségével pedig indíthatjuk a szűrést. 
+[code]
+protected FilterResults performFiltering(CharSequence constraint)
+protected void publishResults(CharSequence constraint, FilterResults filterResults)
+[/code]
+A [i]performFiltering()[/i] egy háttérszálon fut. Végignézi az [i]originalEntries[/i] minden egyes elemét, és ha megfelel a szűrési feltételnek (esetünkben tartalmazza a megadott szöveget), akkor egy belső, [i]filterList[/i]-be helyezi. A procedúra végén a [i]FilterResults[/i] adja vissza az eredményt. [i]count[/i] részbe kerül a szűrt elemek száma, [i]values[/i] részbe pedig maguk az elemek.
+Két speciális esetet még kezelnünk kell: elképzelhető, hogy [i]originalEntries[/i] értéke [b]null[/b], ebben az esetben nem csinálunk semmit, [i]FilterResults[/i] is [b]null[/b] értéket kap.
+A másik esetben nincs [i]constraint[/i], ilyenkor elég az [i]originalEntries[/i]-t a [i]FilterResults[/i]-ba tenni, és visszaadni.
+
+A [i]FilterResults[/i] értéket a [i]publishResults[/i] kapja meg, mely már a fő szálon fut. A kapott értékkel feltölti a [i]filteredEntries[/i] tömböt, és értesíti az adaptert a változásról ([i]notifyDataSetChanged[/i]).
+
+[b]Mi történik, ha új adatot adunk hozzá?[/b]
+
+Amíg egyáltalán nem szűrtünk, addig a [i]filteredEntries[/i] megegyezik az [i]originalEntries[/i] tömbbel; mindkettő a külső adat forrásra mutat. Ebben az esetben a hozzáadás mindkét tömbben tükröződik, és az elem megjelenik.
+Amint egy szűrés lefutott, a [i]filteredEntries[/i] már egy új tömbre mutat. Ez az [i]originalEntries[/i] egy részét tartalmazza. Az új adat viszont csak az [i]originalEntries[/i] tömbben jelenik meg, tehát akár megfelel a szűrési feltételnek, akár nem: semmiképp sem fog megjelenni a következő szűrésig.
+Még rosszabb a helyzet, ha az adat a szűrési folyamat közben kerül hozzáadásra. Ha az adatsor végére kerül (vagyis a szűrési folyamat még átmegy rajta), akkor - amennyiben a szűrési feltételnek megfelel - ez az elem is megjelenik. Ha azonban nem kerül bele a szűrésbe, akkor elképzelhető, hogy megjelenik (ld. legelső eset); majd a hosszadalmas szűrési folyamat végén eltűnik.
+
+Ezt a bonyodalmas helyzetet egyféleképp tudjuk kezelni: minden változás egy új listát kezdeti állapotot jelent. Ebben az új helyzetben dönthetünk úgy, hogy a szűrést figyelmen kívül hagyjuk, és minden adatot megjelenítünk. Vagy a szűrést alkalmazzuk az új adatra is, és kikényszerítünk egy új szűrést az új adatokkal. 
+
+Ha folyamatban van már egy szűrés, azt mindkét esetben meg kell szakítsuk, vagy legalább jelezni kell, hogy az elkészült adatok ne kerüljenek beírásra. Erre egy flag szolgál, az [i]AsyncTask[/i] mintájára. A flag [i]volatile[/i], ami azt jelenti, hogy bármely szálról atomikusan írható, és az értéke minden szálon hozzáférhető lesz. ((Van itt még egy kérdés: a [i]Filter[/i] leszármazottja csak egyetlen példányban van jelen egy [i]Adapter[/i]-példányon belül. Olyan, mintha annak a része lenne, tehát a flag-et is tehetjük akár a belső, akár a külső osztályba. Mivel a logika ezt diktálja, én a belső osztály részévé tettem.)) Elég lenne a megszakítást jelző flag-et csak a [i]publishResults[/i] részben figyelni, de ha már rendelkezésre áll, akkor leállíthatjuk vele a felesleges szűrést is. Ha most [i]cancelFiltering()[/i] utasítást adunk ki, a háttérben zajló szűrés leáll, az eredménye nem lesz felhasználva.  
+[code]
+private class EntryFilter extends Filter
+	{
+	private volatile boolean filteringCancelled;
+
+	public void cancelFiltering()
+		{
+		filteringCancelled = true;
+		}
+
+	protected FilterResults performFiltering(CharSequence constraint)
+		{
+		filteringCancelled = false;
+		...
+		for (...)
+			{
+			if (filteringCancelled)
+				{
+				...return...
+				}
+			... do filtering here ...
+			}
+		
+		return filterResults;
+		}
+
+	protected void publishResults(CharSequence constraint, FilterResults filterResults)
+		{
+		if ( filterResults.values != null && !filteringCancelled)
+			{
+			... publish results ...
+			}
+		else
+			{
+			... do nothing ...
+			}
+		}	
+	}
+[/code]
+
+Egyszerűbb az összes adat megjelenítése, ilyenkor csak egy [i]filteredEntries=originalEntries[/i] utasítás kell, de hol? 
+Regisztrálhatnánk egy új [i]DataSetObserver[/i]-t, de a másik változatban gondot jelentett, hogy a filter is jelzi, ha az adatállomány megváltozott. Külön kell választanunk a külső és belső adatváltozásokat. Erre több mód is van, végül a [i]notifyDataSetChanged()[/i] metódust bővítettem a külső adatváltozás jelzésére, míg a [i]super.notifyDataSetChanged()[/i] továbbra is használható, ha csak belső állomány változást jelzünk (vagyis pl. itt, vagy akár a filter végén).
+[code]
+@Override
+public void notifyDataSetChanged()
+	{
+	((EntryFilter)getFilter()).cancelFiltering();
+	filteredEntries = originalEntries;
+	super.notifyDataSetChanged();
+	}
+[/code]
+
+Nézzük a nehezebb megoldást! Kényszerítsük ki a szűrést adatváltozás esetén! Az új adat viszont csak abban az esetben jelenik meg, ha igaz rá a szűrési feltétel.
+A szűrés kikényszerítéséhez tárolnunk kell a korábbi [i]constraint[/i] szöveget. Ezt ugyan megszerezhetjük a [i]performFiltering()[/i] során, sőt [b]null[/b] [i]constraint[/i] érték jelentheti, hogy használja az előző, tárolt szűrő-feltételt. Helyesebb lenne a [i]filter()[/i] paraméterét megszerezni, és egy paraméter nélküli [i]filter()[/i] metódust is készíteni. Sajnos, a [i]filter()[/i] [i]final[/i] jelzővel rendelkezik, ehhez nem férünk hozzá.
+Kicsit logikátlanul, de kihasználva, hogy az [i]Adapter[/i] és a [i]Filter[/i] szorosan összefügg, az [i]Adapter[/i] oldalán készítettem két [i]Filter[/i] metódust:
+[code]
+private CharSequence previousConstraint;
+
+public void filter(CharSequence constraint)
+	{
+	previousConstraint = constraint;
+	filter();
+	}
+
+public void filter()
+	{
+	((EntryFilter)getFilter()).cancelFiltering();
+	getFilter().filter(previousConstraint);
+	}
+[/code]
+((Kritikaként: így az [i]Adapter-Filter[/i] kombinációt nem az előírt elveknek megfelelően használjuk (bár úgy is működik). Felmerül a kérdés, hogy akkor miért nem építjük egybe, és egyszerűsítjük ezt a két ilyen szorosan összetartozó osztályt?))
+
+Ezekkel a kiegészítésekkel már könnyű a dolgunk. A [i]MainListFragment[/i]-ben a [i]filter[/i]-t így hívjuk meg:
+[code]
+((MainListAdapter)getListAdapter()).filter( s );
+[/code]
+Az adatváltozás kikényszeríti az ismételt szűrést. Ekkor nem kell meghívnunk a "belső" frissítést, mert azt majd a [i]publishResults()[/i] fogja elvégezni. Ennek világos a logikája: minden adatváltozás szűréssel jár, az eredményes szűrés viszont jelzi az adatok módosulását.
+[code]
+public void notifyDataSetChanged()
+	{
+	filter();
+	}
+...
+protected void publishResults(CharSequence constraint, FilterResults filterResults)
+	{
+	if ( filterResults.values != null && !filteringCancelled)
+		{
+		filteredEntries = (List<SampleEntry>) filterResults.values;
+		MainListAdapter.super.notifyDataSetChanged();
+		}
+	}	
+[/code]
+Érdemes még akár egy [i]Toast[/i] segítségével jelezni, ha adat-hozzáadás történt. Ezzel a kóddal a program már a várakozásoknak megfelelően működik. Ugyanakkor zavaró lehet, hogy a hozzáadott adat csak akkor jelenik meg, ha a szűrési feltételeknek megfelel. Erre a végleges megvalósításban majd figyelni kell. 
+
+[b]Mi történik, ha az adatokat töröljük?[/b]
+
+A fenti elrendezés az adattörlést is figyelembe veszi. (Ott is kiadjuk a [i]notifyDataSetChanged()[/i] parancsot, ami - a második esetben - kivált egy [i]filter()[/i]-t. Mivel nem a tömböt tüntettük el, csak értékek nincsenek benne, ezért a [i]filteredEntries[/i] is üres lesz, nem marad meg az előző.)
+Ugyanakkor van egy érdekes anomália, amire érdemes kitérni: a [i]performFiltering()[/i] alatt egyszer csak eltűnnek a feldolgozandó adatok. Előfordulhat, hogy [i]IndexOutOfBoundsException[/i]-t vagy [i]ConcurrentModificationException[/i]-t kapunk. Ezeket a kivételeket ugyanakkor a filter elnyeli! A forrásban a megfelelő rész mutatja, hogy csak egy figyelmeztetést kapunk, valamint a metódus üres értékekkel tér vissza. Ezért került a [i]publishResults[/i] részbe a [b]null[/b] érték ellenőrzése is - bár erre elvileg nem kerülhet sor.
+[code]
+...
+try {
+	args.results = performFiltering(args.constraint);
+} catch (Exception e) {
+	args.results = new FilterResults();
+	Log.w(LOG_TAG, "An exception occured during performFiltering()!", e);
+}
+...
+[/code]
+Ez csupán csak egy apró érdekesség, mégis érdemes tudni róla. Ha egy elvarázsolt szűrés pl. más kivételeket is dobhat - könnyen lehet, hogy azokról nem lesz tudomásunk.
+
+Talán úgy tűnik, hogy ezek felesleges sallangok a kódon. Ez talán igaz is, hiszen a szűrés legtöbbször azonnal megtörténik, és nem esik egybe az adatváltozással. Ha pedig véletlenül mégis, a következő szűrés javítja a hibát. A másik oldalról viszont hasznos volt részletesebben megismerni, hogy miként működik a szűrés; és ne felejtkezzünk meg arról sem, hogy a szótár project jelenleg közel 300.000 bejegyzést tartalmaz. Ekkora adathalmaz szűrésekor már könnyen megjelenhetnek ezek a problémák.
+
+[b]Apróságok[/b]
+
+Az időigényes műveletek szimulálására készítettem a [i]Rest[/i] osztályt. A [i]Rest.aBit()[/i] az előre beállított 100 ms ideig várakoztatja a szálat. A [i]Rest.millis( int millis )[/i] segítségével a megadott ideig várakozhatunk. Vigyázat! A paramétere - szándékosan - [b]int[/b], és nem az időegységeknél megszokott [b]long[/b]! A legérdekesebb talán a [i]Rest.fraction( int millis, int fraction )[/i] metódus, mivel itt a megadott [b]millis[/b] időt [b]fraction[/b] részre osztjuk, és egy egységnyit várakozunk. Ez olyankor hasznos, ha pl. azt szeretnénk, ha egy [b]for[/b] ciklus mindenképp 5 mp ideig tartana. Ilyenkor megadjuk a teljes időt, és az ciklus összes ciklus számát - majd minden egyes ciklusban ennyi ideig várakozunk. A ciklus - függetlenül a fordulók számától - mindig ugyanannyi ideig fog tartani.
+
+A [url=http://lattilad.org/android/?x=entry:entry121202-151701]Hogyan rejtsük el/jelenítsük meg a Soft Keyboard-ot?[/url] c. cikkben leírtak az új android verziókban csak részben működnek. Egy [url=http://stackoverflow.com/a/17789187]SO cikk[/url] alapján készült el az új [i]Keyboard.hide(activity)[/i] metódus:
+[code]
+public class Keyboard
+	{
+	public static void hide(Activity activity) 
+		{
+		if (activity == null)
+			return;
+
+		activity.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN
+		| WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+
+		InputMethodManager inputMethodManager = (InputMethodManager) activity.getSystemService(Activity.INPUT_METHOD_SERVICE);
+		View cur_focus = activity.getCurrentFocus();
+		if(cur_focus != null)
+			inputMethodManager.hideSoftInputFromWindow(cur_focus.getWindowToken(), 0);
+		}     
+	}
+[/code]
+Figyeljük meg, hogy ez a metódus nem csak a billentyűzetre van hatással, hanem az [i]ADJUST_RESIZE[/i] módot is beállítja! (Ugyanezt az [i]AndroidManifest.xml[/i]-ben is megtettük.) Természetesen a billentyűzet megjelenítése ugyanígy elkészíthető, de arra általában nincs szükség: ha egy beviteli mezőt megérintünk, azonnal megjelenik. (A fordítottja sajnos nem igaz: hiába érintjük meg a listát, nem tűnik el a billentyűzet.) 
+
+Ahhoz, hogy a billentyűzet eltűnjön a lista megérintésekor, a [i]ListView[/i] elem megérintéséhez kell rendelnünk a fenti metódust. Ezt megtehetjük a [i]view[/i] létrehozásakor ([i]((ListView) view.findViewById(android.R.id.list)).setOnTouchListener…[/i]) vagy az [i]onActivityCreated[/i] részben. Vigyázzunk arra, hogy a billentyűzet elrejtése csak a [i]ListView[/i]-nál történik meg, [i]EmptyView[/i] esetén nem! 
+[code]
+getListView().setOnTouchListener( new OnTouchListener()
+	{
+	@Override
+	public boolean onTouch(View v, MotionEvent event)
+		{
+		if (event.getAction() == MotionEvent.ACTION_DOWN) 
+			Keyboard.hide( getActivity() );
+		return false;
+		}
+	});
+[/code]
+
+Ugyanezt a rutint a [i]Fragment[/i] megjelenítésekor is elhelyezhetjük, akár az [i]Activity.onResumeFragments[/i] részben, az új [i]Fragment[/i] létrehozásánál. Ezzel elérjük, hogy az első megjelenéskor nem lesz billentyűzet, míg a későbbi újraindításoknál a billentyűzet állapotát a rendszer állítja be. (Úgy tűnik, a különböző verziók ebből a szempontból sem viselkednek egységesen.)
+

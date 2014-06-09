@@ -8,5 +8,9 @@ Items are not saved between sessions.
 Long and short taps are implemented.
 Options menus are available form Activity and also form Fragment.
 
+Filtering added (long-lasting process simulated!) 
+Newly added elements will be shown only in case of true filtering condition.
+Soft-keyboard hides on list-view tap.
+
 Longer explanation (Hungarian) can be found at 'http://lattilad.org/android'
 

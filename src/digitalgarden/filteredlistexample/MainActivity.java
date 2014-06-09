@@ -10,6 +10,7 @@ import android.view.Menu;
 import android.view.MenuItem;
 import android.widget.Toast;
 import digitalgarden.magicmerlin.scribe.Scribe;
+import digitalgarden.magicmerlin.utils.Keyboard;
 
 
 public class MainActivity extends FragmentActivity
@@ -73,6 +74,9 @@ public class MainActivity extends FragmentActivity
 			fragmentTransaction.add( R.id.main_frame, mainListFragment, "LIST" );
 			fragmentTransaction.commit();
 
+			// New fragment always starts without keyboard
+			Keyboard.hide( this );
+			
 			Scribe.debug("New LIST Fragment was created, added");
 			}
 		else

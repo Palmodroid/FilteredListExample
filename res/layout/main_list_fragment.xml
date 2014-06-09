@@ -17,8 +17,10 @@
         android:layout_height="wrap_content"
         android:layout_alignParentBottom="true"
         android:layout_toRightOf="@id/add_button"
-        android:hint="@string/filter_hint" />
-
+        android:hint="@string/filter_hint" >
+        <requestFocus />
+    </EditText>
+    
     <!-- or android:layout_alignBaseline="@id/add_button" -->
     
     
@@ -27,7 +29,6 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:layout_above="@id/add_button" >
-        <requestFocus />
     </ListView>
         
 	<!-- http://code.google.com/p/android/issues/detail?id=21742 -->

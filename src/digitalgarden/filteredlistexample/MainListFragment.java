@@ -4,17 +4,23 @@ import java.util.ArrayList;
 
 import android.os.Bundle;
 import android.support.v4.app.ListFragment;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
+import android.view.MotionEvent;
 import android.view.View;
+import android.view.View.OnTouchListener;
 import android.view.ViewGroup;
 import android.widget.AdapterView;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.ListView;
 import android.widget.Toast;
 import digitalgarden.magicmerlin.scribe.Scribe;
+import digitalgarden.magicmerlin.utils.Keyboard;
 
 public class MainListFragment extends ListFragment implements 
 	AdapterView.OnItemLongClickListener // for long-click check
@@ -48,6 +54,7 @@ public class MainListFragment extends ListFragment implements
 	
 	
 	private Button addButton;
+	private EditText filter;
 	
 	@Override
     public View onCreateView(LayoutInflater inflater, ViewGroup container, Bundle savedInstanceState) 
@@ -56,8 +63,24 @@ public class MainListFragment extends ListFragment implements
 		//return super.onCreateView(inflater, container, savedInstanceState);
 	
         View view = inflater.inflate(R.layout.main_list_fragment, container, false);
-		addButton = (Button) view.findViewById(R.id.add_button);
 
+        addButton = (Button) view.findViewById(R.id.add_button);
+
+		filter = (EditText) view.findViewById(R.id.filter);
+		filter.addTextChangedListener(new TextWatcher() 
+			{
+			@Override
+			public void onTextChanged(CharSequence s, int start, int before, int count) 
+				{
+				Scribe.debug("Filter text was changed!");
+				((MainListAdapter)getListAdapter()).filter( s );
+				}
+			@Override
+			public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+			@Override
+			public void afterTextChanged(Editable s) {}
+			});
+		
         return view;
 		}
 			
@@ -75,6 +98,17 @@ public class MainListFragment extends ListFragment implements
 		// for long-click check
 		getListView().setOnItemLongClickListener( this );
 
+		getListView().setOnTouchListener( new OnTouchListener()
+			{
+			@Override
+			public boolean onTouch(View v, MotionEvent event)
+				{
+				if (event.getAction() == MotionEvent.ACTION_DOWN) 
+					Keyboard.hide( getActivity() );
+				return false;
+				}
+			});
+			 
 		//((TextView)(getListView().getEmptyView())).setText("Changed empty text");
 		
 		addButton.setOnClickListener( new View.OnClickListener()
@@ -84,6 +118,7 @@ public class MainListFragment extends ListFragment implements
 				{
 				Scribe.debug("New SampleEntry added to entries by user.");
 				entries.add( new SampleEntry() );
+				Toast.makeText(getActivity(), "New item was added.", Toast.LENGTH_SHORT).show();
 				((MainListAdapter)getListAdapter()).notifyDataSetChanged();
 				}
 			});
