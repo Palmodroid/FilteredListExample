@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <string name="add_button">Add</string>
+    <string name="refresh_button">Refresh</string>
     <string name="filter_hint">Filter</string>
     <string name="empty_list">- no data available -</string>
     
-    <string name="clear_menu">Clear</string>
+    <string name="restart_menu">Restart</string>
     
 </resources>

@@ -6,6 +6,8 @@ import java.util.Locale;
 import java.util.concurrent.CancellationException;
 
 import android.content.Context;
+import android.content.Intent;
+import android.support.v4.content.LocalBroadcastManager;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -24,6 +26,8 @@ public class MainListAdapter extends BaseAdapter implements Filterable
 	{
 	/** Needed by {@link getView}, set by constructor (using {@link Context}) */
 	private LayoutInflater layoutInflater;
+	/** Context needed by progress-messages */
+	private Context context;
 
 	/** Copy of external source of data */
 	private List<SampleEntry> originalEntries;
@@ -35,13 +39,47 @@ public class MainListAdapter extends BaseAdapter implements Filterable
 
 	
 	/** Constructor */
-	public MainListAdapter( Context context, ArrayList<SampleEntry> entries ) 
+	public MainListAdapter( Context context ) 
 		{
 		super();
-		// context is only needed for layoutInflater
+		this.context = context;
 		this.layoutInflater = (LayoutInflater)context.getSystemService(Context.LAYOUT_INFLATER_SERVICE);
+		}
+
+	/**
+	 * Setup full dataset. Filter will be OFF.
+	 * @param entries external datasource {@code ArrayList} of {@link SampleEntry}-s
+	 */
+	public void setData( List<SampleEntry> entries )
+		{
+		Scribe.locus();
+
+		this.originalEntries = entries;
+		
+		// Filter forced on new data
+		// filter() will cancel previous filtering
+		// filter() will call super.notifyDataSetChanged() 
+		filter();
+		
+		/* Filter OFF
 		this.originalEntries = entries;
 		this.filteredEntries = entries;
+		
+		// External notification is not allowed, super method should be used
+		super.notifyDataSetChanged();
+		*/
+		}
+	
+	/**
+	 * Modification of external data is not allowed.
+	 * Original data source should be modified, and then reload should be forced.
+	 * Loaded data will be changed at every reload (and any direct data changes will be lost).
+	 * notifyDataSetChanged will throw an exception.
+	 */
+	@Override
+	public void notifyDataSetChanged()
+		{
+		throw new UnsupportedOperationException("External data modification is not allowed! Reload will overwrite data!");
 		}
 
 	@Override
@@ -132,35 +170,12 @@ public class MainListAdapter extends BaseAdapter implements Filterable
 		return convertView;
 		}
 	
-	/**
-	 * Signs modification of external data set.
-	 * At this point the program could cancel/ignore any filtering, and show all modified data.
-	 * Supermethod should be called.
-	 * (Implemented now.)
-	 * <p>
-	 * OR 
-	 * <p>
-	 * The program can force a new filtering. New data will be included in this filtering.  
-	 * Filter will call the supermethod.
-	 */
-	@Override
-	public void notifyDataSetChanged()
-		{
-		/*
-		Scribe.debug("External data source was modified, filter ignored!");
-
-		((EntryFilter)getFilter()).cancelFiltering();
-		filteredEntries = originalEntries;
-		super.notifyDataSetChanged();
-		*/
-		Scribe.debug("External data source was modified, filter forced to restart!");
-		filter();
-		// filter() will call super.notifyDataSetChanged()
-		}
-
 	/** Copy of the previous constraint */
 	private CharSequence previousConstraint;
 
+	/** Counter for filterings. Only the last filtering can publish its results */
+	private volatile int filterCounter = 0;
+	
 	/**
 	 * Filter with the given constraint. Constraint will be stored for repeated filtering.
 	 * @param constraint filtered list item contains this string
@@ -176,7 +191,8 @@ public class MainListAdapter extends BaseAdapter implements Filterable
 	 */
 	public void filter()
 		{
-		((EntryFilter)getFilter()).cancelFiltering();
+		filterCounter++; // not atomic, but this is not needed to be atomic.
+						 // it's other readers will be started after this point
 		getFilter().filter(previousConstraint);
 		}
 	
@@ -196,17 +212,6 @@ public class MainListAdapter extends BaseAdapter implements Filterable
 	 */
 	private class EntryFilter extends Filter
 		{
-		/** True value will stop filtering. New filtering will set it to false before start. */
-		private volatile boolean filteringCancelled;
-		
-		/** 
-		 * Cancel filtering on the background thread
-		 */
-		public void cancelFiltering()
-			{
-			filteringCancelled = true;
-			}
-		
 		/**
 		 * Perform filtering operation on a background thread. 
 		 * All entries containing constraint as sub-string will be selected. 
@@ -219,18 +224,20 @@ public class MainListAdapter extends BaseAdapter implements Filterable
 			Scribe.locus();
 
 			FilterResults filterResults = new FilterResults();
-			filteringCancelled = false;
 
-			// data might be empty
-			if (originalEntries == null)
+			// if filterCounter changes (new filtering) this filtering will be invalid 
+			filterResults.count = filterCounter; 
+
+			// data might be empty; OR constraint might be empty - no filtering needed
+			if ( originalEntries == null || constraint == null || constraint.length() == 0 )
 				{
-				Scribe.debug("originalEntries is null, no filtering.");
-				cancelFiltering();
+				Scribe.debug("Filtering is not necessary, all entries will be included in the list");
+				filterResults.values = originalEntries;
 				}
 
 			// all entries containing 'constraint' as sub-string will be copied to a new list
 			// the new list will be returned for publishResults
-			else if (constraint != null && constraint.length() > 0 )
+			else
 				{
 				List<SampleEntry> filterList = new ArrayList<SampleEntry>();
 				constraint = constraint.toString().toLowerCase( Locale.getDefault() );
@@ -239,7 +246,15 @@ public class MainListAdapter extends BaseAdapter implements Filterable
 				try {
 					for ( int i=0; i < originalEntries.size(); i++ )
 						{
-						if (filteringCancelled)
+				    	// Sending progress
+						Intent intent = new Intent(ProgressObserver.ACTION_STRING);
+						intent.putExtra( ProgressObserver.DATA_WHO, ProgressObserver.FILTER );
+						intent.putExtra( ProgressObserver.DATA_CYCLE, i+1 );
+						intent.putExtra( ProgressObserver.DATA_MAX_CYCLES, originalEntries.size() );
+						LocalBroadcastManager.getInstance( context ).sendBroadcast(intent);
+						
+						// New filtering has been started - stop this one!
+						if ( filterCounter != filterResults.count )
 							{
 							Scribe.debug("Filter-cancel sign detected, loop cancelled!");
 							throw new CancellationException();
@@ -258,60 +273,27 @@ public class MainListAdapter extends BaseAdapter implements Filterable
 						Rest.fraction(5000, originalEntries.size());
 						}
 	
-					filterResults.count = filterList.size();
 					filterResults.values = filterList;
 					}
 				// Interesting - superclass will swallow all exceptions!?
 				// InexOutofBounds expections can also occur - if we clear originalEntries 
 				catch (Exception e)
 					{
-					Scribe.error("Filtering cancelled");
-					}
-				
-
-/*				filteringCancelled = false;
-				Iterator<SampleEntry> iterator = originalEntries.iterator();
-				try {
-					while ( iterator.hasNext() )
-						{
-						if (filteringCancelled)
-							{
-							Scribe.debug("Filter-cancel sign detected, throwing ConcurrentModificationException");
-							throw new ConcurrentModificationException();
-							}
-						
-						SampleEntry item = iterator.next();
-						if ( item.getString() != null && 
-						     item.getString().toLowerCase( Locale.getDefault() ).contains( constraint ) )
-							{
-							filterList.add( item );
-							Scribe.debug("    + " + item.getString() + "[" + constraint + "]");
-							}
-						else
-							Scribe.debug("    - " + item.getString() + "[" + constraint + "]");
-						
-						Rest.aBit();
-						}
+					// Other exceptions can arrive here - this will securely avoid publishing 
+					filterResults.count = -1;
 					
-					filterResults.count = filterList.size();
-					filterResults.values = filterList;
+					Scribe.error("Filtering cancelled. Exception occured because of main-thread data change.");
 					}
-				catch (ConcurrentModificationException cme)
+				finally
 					{
-					Scribe.error("Concurrent Modification detected, filtering cancelled.");
-					cancelFiltering();
+				    // Finishing progress
+					Intent intent = new Intent(ProgressObserver.ACTION_STRING);
+					intent.putExtra( ProgressObserver.DATA_WHO, ProgressObserver.FILTER );
+					intent.putExtra( ProgressObserver.DATA_MAX_CYCLES, -1 );
+					LocalBroadcastManager.getInstance( context ).sendBroadcast(intent);
 					}
-*/
 				}
-			
-			// 'constraint' is empty; full dataset remains 
-			else
-				{
-				Scribe.debug("constraint is empty, no filtering.");
-				filterResults.count = originalEntries.size();
-				filterResults.values = originalEntries;
-				}
-			
+						
 			return filterResults;
 			}
 
@@ -319,11 +301,8 @@ public class MainListAdapter extends BaseAdapter implements Filterable
 		/**
 		 * Invoked in the UI thread to publish the filtering results to filteredEntries.
 		 * <p> 
-		 * If {@link originalEntries} (and therefore filterResults.value) are null, 
-		 * than the dataset might not be loaded yet (or filtering was cancelled). 
-		 * In this case {@link filteredEntries} can not be changed, 
-		 * because meanwhile background loading could be finished, 
-		 * but the list will seem empty (because of the null-ed filteredEntries) 
+		 * If new filtering has been started (filterResults.count differs from filterCounter) 
+ 		 * then {@link filteredEntries} can not be changed. 
 		 * @return constraint the constraint used to filter the data
 		 * @return filterResults the results of the filtering operation
 		 */
@@ -332,17 +311,18 @@ public class MainListAdapter extends BaseAdapter implements Filterable
 			{
 			Scribe.locus();
 
-			if ( filterResults.values != null && !filteringCancelled)
+			// filterCounter has not been changed during filtering - this is the last filter request
+			if ( filterResults.count == filterCounter )
 				{
 				filteredEntries = (List<SampleEntry>) filterResults.values;
-				Scribe.debug("filteredEntries changed, contains " + filterResults.count + " items. [" + constraint + "]" );
+				Scribe.debug("Filtering finished, filteredEntries changed, contains " + filterResults.count + " items. [" + constraint + "]" );
 
 				MainListAdapter.super.notifyDataSetChanged();
 				}
+			// filterCounter (or filterRequest.count) has been changed - results are invalid
 			else
-				Scribe.debug("filteredEntries remained, no changes");
+				Scribe.debug("Filtering cancelled, filteredEntries remained.");
 			}	
 		}
-
 	}
 

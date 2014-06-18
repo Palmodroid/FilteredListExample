@@ -12,5 +12,10 @@ Filtering added (long-lasting process simulated!)
 Newly added elements will be shown only in case of true filtering condition.
 Soft-keyboard hides on list-view tap.
 
+Loader added, external data load simulated.
+Data refresh (through broadcast messages) and Loader restart can be used.
+Adapter and filtering changed to work with Loader.
+Different progress indicators added. Progress communicated by broadcast-messages.  
+
 Longer explanation (Hungarian) can be found at 'http://lattilad.org/android'
 

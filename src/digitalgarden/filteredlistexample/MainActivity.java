@@ -8,6 +8,7 @@ import android.support.v4.app.FragmentManager;
 import android.support.v4.app.FragmentTransaction;
 import android.view.Menu;
 import android.view.MenuItem;
+import android.view.Window;
 import android.widget.Toast;
 import digitalgarden.magicmerlin.scribe.Scribe;
 import digitalgarden.magicmerlin.utils.Keyboard;
@@ -40,6 +41,9 @@ public class MainActivity extends FragmentActivity
 		Scribe.locus();
 		super.onCreate(savedInstanceState);
 
+		// Progress bar in title row - feature should be set before setContentView!
+		requestWindowFeature(Window.FEATURE_INDETERMINATE_PROGRESS);
+		
 		setContentView(R.layout.main_activity);
 		}
 

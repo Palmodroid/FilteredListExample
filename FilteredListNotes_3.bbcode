@@ -1,0 +1,471 @@
+[b][i]Lista és ami körülötte van[/i][/b]
+
+Ebben a részben a listánkat nem elemek hozzáadásával, hanem egy ún. [i]Loader[/i]-rel fogjuk feltölteni. [i]Loader[/i] használata akkor célszerű, ha az adatok nem állnak a program rendelkezésére, hanem kívülről jönnek. Ez általában egy [i]sqlite[/i] adatbázist jelent, amihez a rendszer egy külön [i]????Loader[/i]-t nyújt. Néhány ritka esetben azonban szükségünk lehet saját [i]Loader[/i] elkészítésére is. (Ilyen eset, ha a telepített programokat akarjuk kilistázni, de használhatunk [i]Loader[/i]-t egy könyvtárban lévő file-ok felsorolására is. A szótár index-állományának - ez végső soron egy saját adatbázis - betöltése is [i]Loader[/i]-rel történik.)
+A [i]Loader[/i]-ek megértéséhez és elkészítéséhez kiváló segítséget nyújt [i]Alex Lockwood[/i] [url=http://www.androiddesignpatterns.com/2012/08/implementing-loaders.html]Implementing Loaders[/url] c. cikke. Ezt az osztályt ennek alapján hoztam létre, így most is csak az elkészítéséhez szükséges leglényegesebb részekre térek ki. Érdemes a cikket és a dokumentációt is alaposan átolvasni!
+
+A [i]Loader[/i] három állapotát kell kezelnünk: [b]started[/b], [b]stopped[/b] és [b]reset[/b]. ([i]Alex Lockwood[/i] megjegyzi, hogy létezik egy [b]abandoned[/b] állapot is, de ezzel most nem foglalkozunk.) 
+A [i]Loader[/i] osztálynak három feladata van: [i]adatok betöltése[/i], [i]a betöltött adatok szolgáltatása a hívó felé[/i] ill. [i]az adatváltozás figyelése[/i]. Az egyes állapotokat az különbözteti meg, hogy e három szolgáltatás közül melyik működik. 
+[b]Started[/b] állapotban: 
+- adatok betöltése,
+- adatok szolgáltatása (ha kész a betöltés), [i]Ez csak ebben az állapotban történik meg!![/i]
+- adatok figyelése (változás esetén ismételt betöltés).
+[b]Stopped[/b] állapot:
+- nincs adattöltés,
+- nincs adatszolgáltatás,
+- de az adatok figyelése továbbra is megtörténik.
+(([b]Abandoned[/b] állapot:
+- nincs adattöltés,
+- nincs adatszolgáltatás,
+- nincs adatfigyelés sem.
+A [i]Reset[/i] állapottól az különbözteti meg, hogy a betöltött adatokat meg kell őriznünk. Egyébként minden szolgáltatás leáll.))
+[b]Reset[/b] állapot:
+- nincs adattöltés,
+- nincs adatszolgáltatás,
+- nincs adatfigyelés sem.
+Ebben az állapotban az adatokat is el kell engednünk, hogy a [i]Garbage Collector[/i] eltakaríthassa azokat.
+
+[b][i]SampleEntryLoader.java[/i][/b]
+
+Ennyi bevezető után nézzük a kódot! A [i]Loader[/i] osztály elsősorban időigényes adatbetöltéshez szükséges (pl. adatbázis), már kész [i]List[/i] adatok esetén használata felesleges. (Ennek ellenére mi most egy [i]ArrayList[/i]-tel szimuláljuk a betöltést.) A betöltött adatokat az [i]Adapter[/i] nem közvetlenül, hanem a [i]Loader[/i] osztályon keresztül kapcsolja a [i]List[/i]-hez, ezért a [i]Loader[/i] osztálynak is tárolnia kell a betöltött adatokra való hivatkozást (sőt ennek kell tárolni igazán); majd a [i]Loader[/i] osztály fogja ezt az értéket az [i]Adapter[/i]-nek átadni. Esetünkben a háttérben álló adatokat a [b]sampleEntries[/b] tárolja (vagyis: ez a változó mutat az adatokra).
+
+Az első kötelezően elkészítendő metódus a konstruktor. Itt csak egy, de annál fontosabb dologra kell figyelnünk: az egész osztály teljesen függetlenül működik az [i]Activity[/i]-től! Ezt az egész osztályt a [i]LoaderManager[/i] kezeli, és a [i]Loader[/i] akkor is megmarad, amikor az [i]Activity[/i] (pl. elforgatás miatt) újraindul! Ez majd az [i]Activity[/i]-vel való kommunikációnál is gondot okozhat, most csak arra kell figyelnünk, hogy a paraméterként átadott [i]Activity context[/i]-et nehogy eltároljuk, hanem bízzuk ezt a [i]superclass[/i] konstruktorára! Ez nem az [i]Activity[/i], hanem az [i]ApplicationContext[/i]-et fogja tárolni. ([i]Loader[/i] osztály konstruktorából: [code]mContext = context.getApplicationContext();[/code])
+
+Ahhoz, hogy a [i]Loader[/i] kommunikálni tudjon a programunk többi részével, további metódusok elkészítésére is szükség van: 
+[code]
+public void deliverResult( List<SampleEntry> entries ) 
+protected void onStartLoading() 
+protected void onStopLoading() 
+protected void onReset() 
+protected void onForceLoad() 
+[/code]
+Ill. ez utóbbit az [i]AsyncTaskLoader[/i] már elkészítette számunkra, ehelyett a 
+[code]
+public List<AppEntry> loadInBackground()
+[/code]
+elkészítése szükséges. Az [i]AsyncTaskLoader[/i] az [i]AsyncTask[/i]-nál megismert módon, egy háttérszálon dolgozik. Ha szükséges, ez a munka megszakítható, de a megszakítás nem azonnal következik be. A megszakítás után szükséges feladatokat az 
+[code]
+public void onCanceled(List<SampleEntry> entries)
+[/code]
+metódusban helyezhetjük el.
+((Talán észrevettük, hogy minden állapothoz tartozik egy metódus, így természetesen létezik az [i]onAbandon()[/i] is. Ezt nem készítjük el, így - elvileg - az [i]abandoned[/i] állapot is ugyanolyan lesz, mint a [i]stopped[/i], vagyis nem fogjuk leállítani az adatváltozás figyelését. ))
+Saját munkánkat megkönnyítendő pedig egy további segéd-metódust is fogunk készíteni. Ez jelenleg semmit nem csinál, de ha az adatainkhoz egyéb resource-ok is kötöttek, akkor azokat itt szabadíthatjuk fel:
+[code]
+private void releaseResources(List<SampleEntry> entries) 
+[/code]
+
+[b]public List<AppEntry> loadInBackground()[/b]
+Ez a metódus végzi el a legfontosabb feladatot: egy háttérszálon futva feltölti a listánkat. Figyeljük meg, hogy nem nyúl a globális [b]sampleEntries[/b] mutatóhoz, hanem egy külön adat-halmazt hoz létre, és ennek az adat-halmaznak a mutatója lesz a visszatérési értéke. Vagyis mi csak előkészítjük a háttérben álló adatokat, azokat ténylegesen a rendszer fogja a [b]sampleEntries[/b] mutatóhoz kapcsolni.
+
+[b]public void deliverResult( List<SampleEntry> entries )[/b]
+Ha az adatok betöltése megtörtént, akkor a [i]deliverResult()[/i] szolgáltatja azokat a hívó fél felé (esetünkben a [i]ListFragment[/i] felé), mégpedig annak [i]onLoadFinished()[/i] metódusán keresztül. Az adatszolgáltatást kizárólag [b]started[/b] állapotban kell elvégeznünk.
+Van azonban egy buktató: elképzelhető, hogy a háttérben folyó munka még tart, amikor a [i]Loader[/i] [b]Reset[/b] állapotba kerül. Erre az esetre azért kell figyelnünk, mert ilyenkor az éppen elkészült adatokat fel kell szabadítani. ([i]Alex Lockwood[/i] megjegyzi, hogy talán helyesebb lenne ezt a vizsgálatot a rendszernek elvégezni, de ha már nem teszi meg, akkor kénytelenek vagyunk mi figyelni rá.)
+
+A kód egy kicsit különbözik a cikkben leírtaktól. [b]Started[/b] állapotban a [i]superclass[/i] elvégzi az adatszolgáltatást. Ezt követően már érvényteleníthetjük a régi adatokat, majd - ha [b]Reset[/b] állapotban lennénk - akkor szolgáltatás helyett az újakat is érvénytelenítjük.  Ha azonban nem ez a helyzet, (vagyis meg kell őriznünk a betöltött adatokat), akkor a már érvénytelenített régi adatok helyett eltároljuk az (érvényes) új adatokat.
+[code]
+@Override
+public void deliverResult(List<SampleEntry> entries) 
+	{
+	if (isStarted()) 
+		super.deliverResult(entries);
+
+	if (sampleEntries != entries) 
+		releaseResources(sampleEntries);
+
+	if (isReset()) 
+		releaseResources(entries);
+	else
+		sampleEntries = entries;
+	}
+[/code]
+
+[b]protected void onStartLoading()[/b]
+
+Ezen a kódon szintén változtattam. Az adatok megváltozása [b]started[/b] állapotban kiváltja az adatok ismételt betöltését. Ugyanakkor, ha [b]stopped[/b] állapotba kerültünk, akkor az adatok megváltozása csak egy [i]flag[/i]-et állít be, melyet a [i]takeContentChanged()[/i] kérdez le. Ennek alapján három út áll előttünk, amikor ismét [b]started[/b] állapotba kerülünk: adatok megváltoztak - újratöltés; adatok nincsenek - újratöltés; adatok rendelkezésre állnak - régi adatok visszaadása.
+[code]
+if (takeContentChanged()) 
+	forceLoad();
+else if (sampleEntries == null) 
+	forceLoad();
+else // if (sampleEntries != null) 
+	deliverResult(sampleEntries);
+[/code]
+Az eredeti kód szerint adatváltozás esetén is a régi listát kapjuk vissza, amíg az új adatok betöltése be nem fejeződik. Hogy melyik az előnyösebb: jelezni a töltést vagy részben érvényes adatokat megjeleníteni - eldönthetjük.
+Ez az a pont, ahol az adatok figyelését végző [i]observer[/i]-t is be kell kapcsoljuk, ha nem történt volna még meg.
+
+[b]protected void onStopLoading()[/b]
+
+[b]Stopped[/b] állapotban szinte semmi dolgunk sincs (hiszen az adatok szolgáltatását nem itt állítjuk le, hanem a [i]deliverResult[/i]-ban ellenőrizzük; az adatok figyelése pedig nem változik). Egyetlen feladatként megállíthatjuk a háttérben zajló adattöltést (már ha van ilyen).
+[code]
+cancelLoad();
+[/code]
+
+[b]public void onCanceled(List<SampleEntry> entries)[/b]
+
+Ide tartozik akkor a megszakítást kezelő rész is. A háttérben futó munka leállt (elvileg a régi adataink megvannak), de a megszakított folyamatból származó adatok után illik feltakarítani:
+[code]
+releaseResources(entries);
+[/code]
+Az eredeti kód a [i]super[/i] metódust illendőségből meghívja, de ha vetünk egy pillantást a forráskódra, akkor látjuk, hogy ez a metódus üres. Ugyanúgy, ahogy a többi [i]on...[/i] metódusnál sem hívjuk meg a [i]superclass[/i]-t, itt sem fogjuk.
+
+[b]protected void onReset()[/b] 
+
+A [b]reset[/b] állapot teljes leállást jelent. Az [i]onStopLoading()[/i]-gal leállítjuk az adatok betöltését. A jelenleg rendelkezésre álló adatokat lezárjuk, és elengedjük. Ezt követően a monitorizálást is befejezzük. 
+
+
+[b][i]DataChangeObserver és az adatok monitorizálása[/i][/b]
+
+Az adatok változását broadcast-üzenetekkel jelezzük. Ehhez részben egy [i]BroadcastReceiver[/i] elkészítésére, valamint a már kész kódban is néhány kiegészítésre lesz szükségünk. A [i]BroadcastReceiver[/i] konstruktora beregisztrálja magát az osztályt - ezúttal csak a [b]DatasetChanged[/b] üzenetek elkapására. Figyeljük meg, hogy csak a lokális, és nem a teljes rendszeren végigfutó üzeneteket figyeljük.
+Ha üzenet érkezik, akkor a [i]Loader.onContentChanged()[/i] metódust fogjuk meghívni. Ezt már elkészítették számunkra: ha a [i]Loader[/i] működik, akkor [i]forceLoad()[/i]-dal kikényszeríti az adatok újratöltését; ha a [i]Loader[/i]-t leállítottuk (vagyis nincs adattöltés), akkor is a [i]takeContentChanged()[/i] flagjának beállításával jelezzük, hogy a következő indításnál az adatok újratöltése szükséges. Ezt vizsgálja meg a [i]Loader[/i] az [i]onStartLoading()[/i] rész elején.
+
+A [i]Loader[/i] osztályban szükséges kiegészítések:
+Itt is tárolnunk kell az observer osztály hivatkozását ahhoz, hogy később ki tudjuk kapcsolni:
+[code]
+private DataChangeObserver dataChangeObserver;
+[/code]
+Az adatok monitorizálását (vagyis az observer bekapcsolását) az [i]onStartLoading[/i]-ban végezzük el:
+[code]
+protected void onStartLoading() 
+	{
+	...
+	if (dataChangeObserver == null) 
+		{
+		dataChangeObserver = new DataChangeObserver(this);
+		}
+	}
+[/code]
+Ettől a ponttól kezdve az adatváltozás megfigyelése automatikusan történik (pontosabban az observer [i]onReceive()[/i] metódusa triggereli a [i]Loader[/i]-t.) 
+Az [i]onReset()[/i] részben viszont gondoskodnunk kell az observer kikapcsolásáról:
+[code]
+protected void onReset() 
+	{
+	...
+	if ( dataChangeObserver != null ) 
+		{
+		LocalBroadcastManager.getInstance( getContext() ).unregisterReceiver( dataChangeObserver );
+		dataChangeObserver = null;
+		}
+	}
+[/code]
+Az adatváltozást jelző broadcast-üzenet feladására később visszatérünk.
+
+
+[b][i]MainListAdapter.java[/i][/b]
+
+Az [i]Adapter[/i] hidat képez a lista ([i]ListView[/i]) és a háttérben álló adatok között. Ha [i]Loader[/i]-t is használunk, akkor a [i]Loader[/i] ennek a hídnak a másik pillére, hiszen az fogja számunkra az adatokat szolgáltatni.
+A [i]Loader[/i] működéséről az [i]Adapter[/i] nem tud; hanem a rendelkezésre álló adatokkal dolgozik. Nem biztos, hogy az adatok már betöltésre kerültek, ezért a [b]null[/b] értéket - vagyis az adatok nélküli helyzetet - is kezelnünk kell.
+A korábbi verzióban egy külső adatforrást használtunk, melyet a konstruktor adott át az adapternek. A program futása során ezt a külső adathalmazt megváltoztathattuk, és az adapter (meg a lista) követte a változásokat. Most a [i]Loader[/i] figyeli az adatainkat, ha változást észlel, azonnal újratölti azokat. Az újratöltés során az előző - esetleg kívülről megváltoztatott - adatok felülírásra kerülnek. Ebben a megoldásban mindig az eredeti adatokat kell módosítani (és nem az adapter által is használt tömböt), aztán kikényszeríteni az adatok újratöltését. Mint látni fogjuk, az adatok átadása miatt a tömbhöz egyébként hozzáférünk. Beépíthetünk egy biztonsági szelepet, a [i]notifyDataSetChanged[/i] átírásával a külső adatok utáni frissítésnél jelezzük, hogy nem megengedett művelet történt. A "belső", adapteren belüli adatmódosítás persze szükséges, ezt a [i]super.notifyDataSetChanged()[/i] segítségével jelezhetjük.
+[code]
+@Override
+public void notifyDataSetChanged()
+	{
+	throw new UnsupportedOperationException("External data modification is not allowed! Reload will overwrite data!");
+	}
+[/code]
+
+Az [i]Adapter[/i] tehát nem áll közvetlen összeköttetésben a [i]Loader[/i]-rel, a betöltött adatokat nekünk kell átvinni. Ehhez először is biztosítani kell egy metódust, mellyel az adatforrást átállíthatjuk. Itt megint egy fontos döntés előtt állunk: az adatok újratöltésénél a filtertől függetlenül megjelenjenek-e az adatok (egyszerűbb); avagy kényszerítsük ki az új adatok szűrését (összetettebb, és nem feltétlenül látjuk az új elemet). Ismét megjegyzem, hogy egyik megoldás sem felhasználóbarát, de talán látva az alapvető logikát, könnyebb továbblépni.
+
+[b]Új adatok betöltése a szűrő kikapcsolásával[/b]
+[code]
+public void setData( List<SampleEntry> entries )
+	{
+	((EntryFilter)getFilter()).cancelFiltering();
+
+	this.originalEntries = entries;
+	this.filteredEntries = entries;
+	
+	super.notifyDataSetChanged();
+	}
+[/code]
+Ha esetleg van folyamatban szűrés, akkor azt leállítjuk, hiszen a régi adatok már érvénytelenek. Mivel ismételt szűrést nem kell kikényszeríteni, ezért a [i]filter()[/i] metódus(ok) feleslegesek, bár használhatóak.
+
+[b]Új adatok betöltése ÉS szűrés kikényszerítése[/b]
+Ez a megoldás egy csöppet összetettebb. Az adatok megadását minden alkalommal követi a kikényszerített szűrés, majd az adatváltozás bejelentése a szűrés elvégzése után történik ([i]publishResults()[/i]). Ehhez a [i]filter()[/i] metódust használjuk fel.
+[code]
+public void setData( List<SampleEntry> entries )
+	{
+	this.originalEntries = entries;
+	filter();
+	}
+[/code]
+Amikor az adatok nem változnak, akkor a [i]constraint[/i] változásakor következhet be szűrés ([i]filter(constraint)[/i] metódus). 
+A [i]filter()[/i] egyúttal leállítja az éppen folyamatban lévő szűrést is.
+
+Meg kell változtatnunk a szűrési utakat: hiszen előfordulhat, hogy egy lista törlése után [b]null[/b] értéket kapunk vissza, amit nem "változás nem történt"-ként, hanem ténylegesen üres tömbként kell értékelnünk. (A [b]null[/b] értéket korábban a rendszer általi kivételkezelés miatt hagytuk benne.)
+ Az általunk elkészített metódusok a [i]filter()-performFiltering()-publishResults()[/i] vonalat követik, azzal a kitétellel, hogy a középső szál a háttérben fut. Sajnos, bekövetkezhet olyan helyzet, hogy a következő [i]performFiltering[/i] már elindult, amikor az előző [i]publishResults[/i] még nem került meghívásra. Ez azt eredményezte, hogy szűrés során egy újabb karakter beírásakor eltűnt a teljes lista (mivel [b]null[/b] értéket kapott).
+Nem tudunk a filter minden részéhez hozzáférni, ezért a következő (kissé barkács) megoldást választottam: Minden szűrésnek lesz egy sorszáma, melyet a növekvő [i]filterCounter[/i] számlálótól kap meg. Ha a szűrés után is megegyezik e két sorszám, akkor a szűrt adatok közölhetőek. Ha a [i]filterCounter[/i] növekszik, akkor új szűrés indult, abbahagyhatjuk a szűrést. Hiba esetén viszont a saját sorszámunkat csökkentjük (negatív értékre). Egyik esetben sem egyezik meg a két sorszám, tehát az adatok nem közölhetőek.
+Persze egy kész rendszerbe nem egyszerű belenyúlni. Ideális helyzetben a sorszámot még a fő-szálon szereznénk meg, végigküldenénk az egész úton, és végül ismét a fő szálon ellenőriznénk. Erre sajnos nincs mód. Mivel a [i]Filter[/i] osztály [i]filter()[/i] metódusához nem férünk hozzá, a sorszámot a saját [i]Adapter.filter()[/i] metódusunkban generáljuk. (Ettől a ponttól kezdve a korábbi szűrések érvénytelenek.) Ezt az értéket a [i]performFiltering()[/i] veszi elő (mert átadni nem tudjuk), majd a [i]filterResults.counter[/i] részt használja a továbbadásra (ugyan másra való, de úgyse használtuk idáig.)
+Mivel háttérszálon is dolgozunk, a [i]filterCounter[/i]-t szinkronizálni kell. Itt a [i]volatile[/i] megoldásnál maradtam, mely biztosítja, hogy az adat írható/olvasható legyen; de a műveletek már nem lesznek egységesek. Csak a [i]filter()[/i] részben történik inkrementálás, de ezt az értéket egy ideig még globálisan tartjuk - így nem megoldható a teljes szinkronizálás. Ez azt jelenti, hogyha két [i]Filter[/i] indul gyorsan egymás után, akkor az elsőként indult kiveheti a második által megnövelt értéket - vagyis kaphatunk helytelen eredményt. Ezen csak a [i]filterCounter[/i] belső átadása segítene, az inkrementálás teljes szinkronja viszont nem. Szerencsére a filterek a gyakorlatban nem követhetik ilyen gyorsan egymást, tehát ez a probléma nem fog gyakorlati gondot okozni. ((Igaz, egy szélsőséges helyzetben is helyesen működő filtert szerettem volna kapni, de úgy tűnik, ez csak a teljes filter rész újraírásával valósítható meg. Az viszont aránytalanul nagy munka, mert a háttérszál kezelését, a rendszer által biztosított kényelmi funkciókat mind el kell készíteni...))
+[code]
+protected void publishResults(CharSequence constraint, FilterResults filterResults)
+	{
+	if ( filterResults.count == filterCounter )
+		{
+		filteredEntries = (List<SampleEntry>) filterResults.values;
+		MainListAdapter.super.notifyDataSetChanged();
+		}
+	}	
+[/code]
+A [i]performFiltering()[/i] metódusban valójában két helyzetet kell lekezelni: nem kell szűrés (és a [i]filteredEntries[/i] megkapja a teljes [i]originalEntries[/i] tömböt; vagy el kell végezni a szűrést.
+A [i]filterResults.counter[/i] értéket használjuk a szűrés sorszámának tárolására. Ennek az ellenőrzése került bele a szűrési ciklus megszakításába is.
+[code]
+protected FilterResults performFiltering(CharSequence constraint)
+	{
+	FilterResults filterResults = new FilterResults();
+	filterResults.count = filterCounter; 
+	if ( originalEntries == null || constraint == null || constraint.length() == 0 )
+		{
+		filterResults.values = originalEntries;
+		}
+	else
+		{
+		List<SampleEntry> filterList = new ArrayList<SampleEntry>();
+		constraint = constraint.toString().toLowerCase( Locale.getDefault() );
+		try 
+			{
+			for ( int i=0; i < originalEntries.size(); i++ )
+				{
+				if ( filterCounter != filterResults.count )
+					throw new CancellationException();
+				if ( originalEntries.get(i).getString() != null && 
+					 originalEntries.get(i).getString().toLowerCase( Locale.getDefault() ).contains( constraint ) )
+					filterList.add( originalEntries.get(i) );
+				}
+			filterResults.values = filterList;
+			}
+		catch (Exception e)
+			{
+			filterResults.count = -1;
+			}
+		}
+	return filterResults;
+	}
+[/code]
+((Bár végül ennél a megoldásnál maradtam, érdemes itt egy kicsit elgondolkodni. A [i]catch (Exception e)[/i] rész szükséges, hiszen különben a külső (gyári) rész fogja elkapni a kivételt. Ugyanakkor ez a kivételkezelés nem tesz különbséget az adatváltozás következtében dobott, ill. a más okból dobott kivételek között. Mi történik akkor, ha a filter feltételében keletkezik kivétel? A probléma merőben elméletinek tűnik, hiszen a szűrés ilyenkor is leáll. Azonban ebben az esetben nem fog új szűrés indulni, így ahelyett, hogy a hibáról értesítést kapnánk, az elavult adatokkal feltöltött listánk marad meg. Megoldásként most megelégedtem annyival, hogy a feltételben nem várható kivétel.))
+
+[b][i]MainListFragment.java[/i][/b]
+Minden [i]Loader[/i]-rel kapcsolatos részt elkészítettünk. Nincs más hátra, minthogy a [i]ListFragment[/i]-ben bekapcsoljuk a betöltésért felelős részeket. Ilyet már készítettünk, úgyhogy nincs nehéz dolgunk. Csak a lépéseket foglalom össze. Implementáljuk a [i]LoaderCallbacks[/i] metódusokat:
+[code]
+public class MainListFragment extends ListFragment implements LoaderManager.LoaderCallbacks<List<SampleEntry>>, …
+[/code]
+A [i]Loader[/i] kap egy azonosó számot. Ezzel nincs sok dolgunk, mert csak egy [i]Loader[/i] van:
+[code]
+private final int LOADER_ID = 1;
+[/code]
+Elkészítjük a szükséges három metódust:
+[code]
+@Override
+public Loader<List<SampleEntry>> onCreateLoader(int id, Bundle args)
+	{
+	return new SampleEntryLoader(getActivity()); 
+	}
+
+@Override
+public void onLoadFinished(Loader<List<SampleEntry>> loader, List<SampleEntry> data)
+	{
+	((MainListAdapter)getListAdapter()).setData( data );
+	}
+
+@Override
+public void onLoaderReset(Loader<List<SampleEntry>> loader)
+	{
+	((MainListAdapter)getListAdapter()).setData(null);
+	}
+[/code]
+Végezetül odadjuk a [i]Loader[/i]-t a [i]LoaderManager[/i]-nek. Innetől az adattöltést már nem mi felügyeljük. (Az első paraméter az ID; a második hasonló, mint fragmentnél az arguments - most nincs rá szükség; a harmadik pedig saját magunk, vagyis a callback metódusokat tartalmazó rész.) 
+[code]
+@Override
+public void onActivityCreated(Bundle savedInstanceState)
+	{
+	…
+	setListAdapter( new MainListAdapter( getActivity() ) );
+	getLoaderManager().initLoader( LOADER_ID , null, this);
+	…
+	}
+[/code]
+Mivel a betöltött, külső adatokat az [i]onLoadFinished()[/i] részben közvetlenül a [i]MainListAdapter.setData()[/i] metódus kapja meg, ezért az adatok tárolására már nincs szükség. Az [i]entries[/i] tömböt törölhetjük.
+
+[b]Adatok megváltoztatása[/b]
+Az előző verzióban két ponton is hozzányúltunk az adatokhoz: részben az [i]Add[/i] billentyűvel, részben a [i]Clear[/i] menüvel. Most egyikre sincs lehetőségünk, [i]Loader[/i] esetén csak az eredeti adatokat változtathatjuk meg, és aztán ki kell kényszeríteni az újratöltést. A [i]Loader[/i], mint egy cache, tárolja ugyan az adatokat, még meg is tudnánk ezeket szerezni, de a köztes adatok megváltoztatása nem vonja magával a forrásadatok módosulását, ill. a következő töltésnél elveszik.
+
+A menüpontot változtassuk [i]Restart[/i]-ra. Az itt használt [i]LoaderManager.restartLoader()[/i] metódus újraindítja a [i]Loader[/i]-ünket, és ezzel újra be fogja olvasni az adatokat. Ez a metódus nagyon hasonlít az [i]initLoader()[/i] metódusra. Ugyanakkor az [i]initLoader()[/i] csak akkor hoz létre [i]Loader[/i]-t, ha még nincs; egyébként csak előhívja a már betöltött köztes adatokat. A [i]restartLoader()[/i] mindenképp eldobja a létező [i]Loader[/i]-t adatokkal együtt, és újat hoz létre. (Ez a metódust egyébként az [i]sqite[/i] adatbázis alapú listák esetén lesz majd hasznos.)
+[code]
+case R.id.restart:
+	getLoaderManager().restartLoader( LOADER_ID , null, this);
+	return true;
+[/code]
+
+Az adatok újratöltése ugyan a fenti metódussal is kikényszeríthatő, de valójában adatváltozás esetén [i]broadcast[/i] üzenetet kapunk, mely csak az adatok újraolvasását kényszeríti ki a megtartott [i]Loader[/i]-től. Ezt az eddigi [i]Add[/i] gombbal fogjuk szimulálni. (A gomb elnevezéseit módosítsuk [i]Refresh[/i]-re!)
+[code]
+public void onClick( View view )
+	{
+	Intent intent = new Intent("DatasetChanged");
+	LocalBroadcastManager.getInstance( getActivity() ).sendBroadcast(intent);
+	}
+[/code]
+
+[b]Szűrés a program újraindítása után[/b]
+Érdekes kérdés, hogy a készülék elfordítása után miért kapunk szűrt listát? Hiszen - elvileg - mi sehol nem kényszerítettük ki a szűrést!?
+Az [i]EditText filter[/i] az [i]onCreateView[/i] részben kap egy [i]TextChangedListener[/i]-t. Ettől a ponttól kezdődően minden változás kiváltja a szűrést. A rendszer vissza fogja állítani az [i]EditText[/i]-ek értékét, de csak az [i]onActivityCreated[/i] után. Ekkor már él a [i]Listener[/i], és észleli, hogy a szöveg megváltozott - vagyis elindítja a szűrést. Lehet, hogy a [i]Loader[/i] már lefutott - ekkor a szűrés már az adatokon történik meg. Ha azonban a [i]Loader[/i] még nem szolgáltatott adatokat, akkor a szűrés dolgavégezetlen visszatér - de a [i]constraint[/i] már tárolásra kerül. 
+((Kipróbálhatjuk, hogy áttesszük a [i]filter.addTextChangedListener()[/i] részt pl. az [i]onStart[/i] metódusba. Ebben az esetben NEM fog elindulni a szűrés, hiszen az [i]EditText[/i] megváltozásakor még nem áll rendelkezésre [i]Listener[/i].))
+
+[b]Visszajelzés a töltési/szűrési folyamatról[/b]
+Most mesterségesen lassítottuk mind a töltés, mind a szűrés folyamatát. Valós helyzetben a szűrés várhatóan gyors, de a töltés lehet időigényes. Jó lenne valamilyen visszajelzés a futó folyamat(ok)ról.
+
+[url=http://www.slideshare.net/cbeyls/android-loaders-reloaded]Christophe Beyls: Android Loaders Reloaded[/url] c. kiváló előadásában felveti, hogy a [i]Loader[/i]-eknél sem a hibajelzés, sem a folyamat állapotának visszajelzése nem megoldott.
+A probléma abban rejlik, hogy az [i]Activity/Fragment[/i] ill. a [i]Loader[/i] külön életutat jár be. Az előbbiek újraindulhatnak, míg a [i]Loader[/i]-t a [i]LoaderManager[/i] életben tartja. Emiatt viszont nem tárolhatunk a másikra utaló hivatkozást egyik oldalon sem, különben azt - az esetleg már érvénytelen - példányt mi tartanánk életben. El tudnánk persze kérni a [i]Loader[/i]-t az id alapján, de ez meglehetősen körülményes. Felhasználhatjuk viszont az adatok változását figyelő [i]broadcast[/i] rendszert az ellenkező irányban: ezúttal a [i]Loader[/i] ill. az [i]Adapter[/i] fog visszajelzést adni. 
+
+[b]Progress: folyamat-jelzések feldolgozása[/b]
+Készítsünk egy [i]ProgressObserver[/i] osztályt! Az [i]Observer[/i] tárolja az őt létrehozó programrészt (mint a [i]DataChangeObserver[/i] a [i]Loader[/i]-t, és amikor üzenetet kap, annak egy metódusát hívja meg. Most azonban nem csupán egy [i]Fragment[/i]-et fogunk tárolni, hanem inkább létrehozunk egy [i]ProgressListener interface[/i]-t. Akár a [i]Fragment[/i], akár az [i]Activity[/i] megvalósítja ezt az [i]interface[/i]-t, az ebben definiált metóduson keresztül képesek lesznek lekezelni a folyamat visszajelzéseket.
+
+Most nem csak az üzenetekre, hanem a adatokra is szükségünk lesz. Egyrészt tudnunk kell, hogy a [i]Loader[/i] vagy a [i]Filter[/i] állapotát jelenítjük meg ([b]who[/b]). Másrészt tudni kell, hogy összesen hány ciklus lesz ([b]maxCycle[/b]), ill. hányadik ciklusban járunk ([b]cycle[/b]).
+
+Az adatokat egy [i]TextView[/i] és egy [i]ProgressBar[/i] mező jeleníti meg. Ehhez át kell alakítani a [i]main_list_fragment.xml[/i] layout-ot. (A nevek: [i]loader_progress_bar, loader_progress ill. filter_progress_bar, filter_progress[/i].) Ezek a mezők csak akkor aktívak, ha tényleges töltés van.  
+
+A mezők feltöltéséhez el kell készítsük a [i]ProgressListener interface[/i]-t, ill. annak metódusát, valamint regisztrálnunk kell a [i]ProgressObserver[/i]-t. Ez nem egyszerű, mert számos ponton bele kell nyúlnunk a [i]MainListFragment[/i] kódjába:
+[code]
+public class MainListFragment extends ListFragment implements 
+	ProgressObserver.OnProgressListener, ... 
+	{
+	...
+	private ProgressObserver progressObserver;
+
+	@Override
+	public void onResume()
+		{
+		super.onResume();		
+		
+		if (progressObserver == null)
+			{
+			progressObserver = new ProgressObserver(getActivity(), this);
+			}
+		}
+	
+	@Override
+	public void onPause()
+		{
+		super.onPause();
+		
+		if ( progressObserver != null ) 
+	    		{
+	    		LocalBroadcastManager.getInstance( getActivity() ).unregisterReceiver( progressObserver );
+	    		progressObserver = null;
+	    		}
+	    	}
+
+	...
+	private ProgressBar loaderProgressBar;
+	private TextView loaderProgress;
+	private ProgressBar filterProgressBar;
+	private TextView filterProgress;
+	
+	@Override
+	public View onCreateView(LayoutInflater inflater, ViewGroup container, Bundle savedInstanceState) 
+		{
+		...
+		loaderProgressBar = (ProgressBar) view.findViewById(R.id.loader_progress_bar);
+		loaderProgress = (TextView) view.findViewById(R.id.loader_progress);
+		filterProgressBar = (ProgressBar) view.findViewById(R.id.filter_progress_bar);
+		filterProgress = (TextView) view.findViewById(R.id.filter_progress);
+		...
+		}
+			
+	...
+	public void onProgress(int who, int maxCycles, int cycle)
+		{
+		if (who == ProgressObserver.LOADER)
+			{
+			if ( maxCycles < 0 )
+				{
+				loaderProgressBar.setVisibility( View.GONE );
+				loaderProgress.setVisibility( View.GONE );
+				}
+			else
+				{
+				loaderProgressBar.setVisibility( View.VISIBLE );
+				loaderProgress.setVisibility( View.VISIBLE );
+				loaderProgress.setText("Loader: " + cycle + "/" + maxCycles);
+				}
+			}
+		if (who == ProgressObserver.FILTER)
+			{
+			if ( maxCycles < 0 )
+				{
+				filterProgressBar.setVisibility( View.GONE );
+				filterProgress.setVisibility( View.GONE );
+				}
+			else
+				{
+				filterProgressBar.setVisibility( View.VISIBLE );
+				filterProgress.setVisibility( View.VISIBLE );
+				filterProgress.setText("Filter: " + cycle + "/" + maxCycles);
+				}
+			}
+		}
+	}
+[/code]
+Ez a kód tartalmaz egy logikai hibát: ha az utolsó progress-message alatt nincs regisztrálva az observer, akkor - elméletileg - a progress üzenetek megmaradhatnak.  Ez egyébként könnyen orvosolható - az [i]onPause[/i] alatt is kikapcsoljuk a progress indikátorokat.
+
+[b]Progress: üzenet a Loader-ből[/b]
+A [i]Loader[/i] a töltési ciklusból küldi az üzeneteket. Amikor a cikus lejárt, akkor küld egy lezáró üzenetet, ezzel értesíti a [i]ProgressListener[/i]-t, hogy a töltés befejeződött, eltüntetheti a jelzést. (A lezáró üzenetet a negatív ciklusszám jelenti.) 
+[code]
+@Override
+public List<SampleEntry> loadInBackground() 
+	{
+	...
+	for (int i = 0; i < SIZE; i++) 
+		{
+		Intent intent = new Intent(ProgressObserver.ACTION_STRING);
+		intent.putExtra( ProgressObserver.DATA_WHO, ProgressObserver.LOADER );
+		intent.putExtra( ProgressObserver.DATA_CYCLE, i+1 );
+		intent.putExtra( ProgressObserver.DATA_MAX_CYCLES, SIZE );
+		LocalBroadcastManager.getInstance( getContext() ).sendBroadcast(intent);
+		
+		...working...
+		}
+
+	Intent intent = new Intent(ProgressObserver.ACTION_STRING);
+	intent.putExtra( ProgressObserver.DATA_WHO, ProgressObserver.LOADER );
+	intent.putExtra( ProgressObserver.DATA_MAX_CYCLES, -1 );
+	LocalBroadcastManager.getInstance( getContext() ).sendBroadcast(intent);
+	
+	return...;
+	}
+[/code]
+
+[b]Progress: üzenet a Filter-ből[/b]
+A [i]Filter[/i] nagyon hasonló módon épül fel. Szükségünk lesz azonban a [i]context[/i]-re, melyet a konstruktorban kapunk meg, és rögtön tárolhatunk is.
+
+[b]Egyéb folyamat-indikátorok[/b]
+Egy egyszerű indikátort magában a [i]layout[/i]-ban helyeztem el:
+[code]
+<ProgressBar
+	android:id="@+id/central_progress_bar"
+	android:layout_width="wrap_content"
+	android:layout_height="wrap_content"
+	android:layout_centerInParent="true"
+	android:visibility="gone" />
+[/code]
+Természetesen ezt is elő kell keresni az [i]onCreateView()[/i] metódusban, ill. egy [i]public[/i] változóban tárolni:
+[code]
+private ProgressBar centralProgressBar;
+...
+centralProgressBar = (ProgressBar) view.findViewById(R.id.central_progress_bar);
+[/code]
+Ezt követően azonban egyszerűen a láthatóság beállításával kapcsolhatjuk ki vagy be. A beindításhoz nincs külön metódus, de a leállítást (amennyiben a [i]Loader[/i]-t figyeljük) elhelyezhetjük a callback metódusokban is.
+[code]
+centralProgressBar.setVisibility( View.GONE );
+ill.
+centralProgressBar.setVisibility( View.VISIBLE );
+[/code]
+
+A másik indikátort maga a rendszer szolgáltatja: a címsorban jelenik meg. Hátulütője, hogy az [i]Activity[/i]-n keresztül tudjuk meghívni. Ezt a tulajdonságot még a [i]setContentView[/i] előtt engedélyezni kell:
+[code]
+requestWindowFeature(Window.FEATURE_INDETERMINATE_PROGRESS);
+setContentView(R.layout.main_activity);
+[/code]
+A [i]Fragment[/i] azonban ettől a ponttól kezdődően használhatja az indikátort. Arra vigyázni kell, hogy a [i]getActivity()[/i] ne legyen [b]null[/b]. Mivel azonban az [i]onProgress[/i] csak ebben az időben aktív (ekkor regisztrált a broadcast-receiver), itt nyugodtan használhatjuk. Vagy - tekintve, hogy az üzeneteket az [i]Activity[/i] is megkapja -, áttehetjük abba az egész [i]ProgressListener[/i]-t.
+[code]
+getActivity().setProgressBarIndeterminateVisibility( false );
+ill.
+getActivity().setProgressBarIndeterminateVisibility( true );
+[/code]
